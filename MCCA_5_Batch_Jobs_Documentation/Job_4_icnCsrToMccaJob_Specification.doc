@@ -1,0 +1,270 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><style>
+@page { size: 8.5in 11.0in; margin: 0.6in 0.6in 0.6in 0.6in; }
+body { font-family: "Segoe UI", Calibri, Arial, sans-serif; font-size: 9.5pt; color: #1E293B; line-height: 1.35; }
+h1 { font-size: 16pt; color: #0F172A; border-bottom: 2px solid #1D4ED8; padding-bottom: 4px; margin-top: 14px; }
+h2 { font-size: 13pt; color: #1E3A8A; margin-top: 12px; border-bottom: 1px solid #CBD5E1; padding-bottom: 2px; }
+h3 { font-size: 11pt; color: #1E40AF; margin-top: 10px; }
+h4 { font-size: 10pt; color: #334155; margin-top: 8px; }
+table { width: 490pt; table-layout: fixed; border-collapse: collapse; margin: 8px 0; font-size: 8.5pt; word-wrap: break-word; overflow-wrap: break-word; }
+th { background-color: #1E3A8A; color: #FFFFFF; font-weight: bold; text-align: left; padding: 5px 6px; border: 1px solid #94A3B8; word-wrap: break-word; }
+td { padding: 4px 6px; border: 1px solid #CBD5E1; vertical-align: top; word-wrap: break-word; }
+pre { background-color: #F8FAFC; border: 1px solid #CBD5E1; padding: 6px; font-family: Consolas, monospace; font-size: 8pt; white-space: pre-wrap; word-wrap: break-word; }
+code { font-family: Consolas, monospace; font-size: 8.5pt; background-color: #F1F5F9; padding: 1px 3px; }
+ul, ol { margin-top: 4px; margin-bottom: 6px; }
+li { margin-bottom: 3px; }
+</style></head><body>
+<h1>Job 4 Specification: icnCsrToMccaJob (FACTS ICN &amp; CSR Monthly / Weekly / Daily Batch Job)</h1>
+<h2>1. Executive Summary &amp; Job Overview</h2>
+<table>
+<tr>
+<th>Attribute</th>
+<th>Details</th>
+</tr>
+<tr>
+<td><b>Job Name / ID</b></td>
+<td><code>icnCsrToMccaJob</code></td>
+</tr>
+<tr>
+<td><b>Source System</b></td>
+<td><b>FACTS</b> (Ingested via Informatica IICS into AlloyDB staging tables <code>MCCA_TMP_CLM</code>, <code>MCCA_TMP_CLM_DTLS</code>, <code>MCCA_TMP_OTHR_INJ_CLMTS_PYMT</code>, <code>MCCA_CLM_RPTD</code>)</td>
+</tr>
+<tr>
+<td><b>Schedule / Execution Modes</b></td>
+<td>Controlled by runtime job parameter <code>batchType</code> via <b><code>BatchTypeDecider.java</code></b>:<br/>1. <b><code>MONTHLY</code> (<code>batchType = &apos;m&apos;</code> or default)</b>: Runs on the 1st of the month at <code>12:20 AM</code> (Executes Steps 1–9, <code>updateRptdColumn</code>, Step 10 <code>clearIcnTempTables</code>, and <code>icnCsrMail</code>).<br/>2. <b><code>WEEKLY</code> (<code>batchType = &apos;w&apos;</code>)</b>: Runs only <code>updateRptdColumn</code> (<code>MccaClaimRptdProcessor</code>).<br/>3. <b><code>DAILY</code> (<code>batchType = &apos;d&apos;</code>)</b>: Runs Steps 8, 9, and <code>updateRptdColumn</code> (no temp table deletion).</td>
+</tr>
+<tr>
+<td><b>Spring XML Configs</b></td>
+<td><code>jobs/icnCsrBatchJob.xml</code> (<code>&lt;batch:job id=&quot;icnCsrToMccaJob&quot;&gt;</code>), <code>common/icnCsrBeanInfo.xml</code></td>
+</tr>
+<tr>
+<td><b>Input Staging Tables</b></td>
+<td><code>MCCA_TMP_CLM</code>, <code>MCCA_TMP_CLM_DTLS</code>, <code>MCCA_TMP_OTHR_INJ_CLMTS_PYMT</code>, <code>MCCA_CLM_RPTD</code>, <code>MCCA_INCURRED_AMT_SUM</code></td>
+</tr>
+<tr>
+<td><b>Main Target Tables</b></td>
+<td><code>MCCA_CLM</code>, <code>MCCA_OTHR_INJ_CLMTS_PYMT</code>, <code>MCCA_HIST</code>, <code>MCCA_REMARKS</code>, <code>IPM_FACTS_CLAIM_MAPPING_TABLE</code>, <code>IPM_FACTS_CLID_MAPPING_TABLE</code>, <code>MCCA_CODES_DECODE</code></td>
+</tr>
+<tr>
+<td><b>External API Called</b></td>
+<td><b>None during batch execution</b> (Sets <code>STATUS = &apos;IC&apos;</code> or <code>&apos;PN&apos;</code> in <code>MCCA_CLM</code>; claim examiners review and submit ICN/CSR via the MCCA Web Portal to <code>/api/v1/Claim/Icn</code> and <code>/api/v1/Claim/Csr</code>).</td>
+</tr>
+<tr>
+<td><b>Email Notification</b></td>
+<td><code>icnCsrMail</code> (<code>MailImpl.java</code> — runs at the end of the <code>MONTHLY</code> flow)</td>
+</tr>
+</table>
+<h2>2. End-to-End Architecture &amp; Step Execution Flow (BatchTypeDecider.java)</h2>
+<p>At startup, <code>&lt;batch:decision id=&quot;decider&quot; decider=&quot;batchTypeDecider&quot;&gt;</code> inspects <code>jobParameters.getString(&quot;batchType&quot;)</code>:</p>
+<p>- If <code>&quot;w&quot;</code> (case-insensitive) -&gt; returns <b><code>FlowExecutionStatus(&quot;WEEKLY&quot;)</code></b> -&gt; jumps directly to <code>updateRptdColumn</code> and ends.</p>
+<p>- If <code>&quot;d&quot;</code> (case-insensitive) -&gt; returns <b><code>FlowExecutionStatus(&quot;DAILY&quot;)</code></b> -&gt; jumps to <code>step8</code> -&gt; <code>step9</code> -&gt; <code>updateRptdColumn</code> and ends.</p>
+<p>- Otherwise (<code>&quot;m&quot;</code> or omitted) -&gt; returns <b><code>FlowExecutionStatus(&quot;MONTHLY&quot;)</code></b> -&gt; runs the full 12-stage monthly pipeline:</p>
+<pre>                                   ┌────────────────────────┐
+                                   │   BatchTypeDecider     │
+                                   │ (batchType parameter)  │
+                                   └───────────┬────────────┘
+                  ┌────────────────────────────┼────────────────────────────┐
+                  │ MONTHLY (&apos;m&apos;)              │ DAILY (&apos;d&apos;)                │ WEEKLY (&apos;w&apos;)
+                  ▼                            │                            │
+[Step 1: ipmFactsMappingUpdateStep]            │                            │
+  (IPMFactsMappingUtil [jobType=&apos;icn_csr&apos;])    │                            │
+                  │                            │                            │
+                  ▼                            │                            │
+[Step 2: step2 (CopyIcnProcessor)]             │                            │
+  (Copies previous max-TXN ICN rows in         │                            │
+   MCCA_CLM to new TXN_ID with REC_TYPE=&apos;CSR&apos;) │                            │
+                  │                            │                            │
+                  ▼                            │                            │
+[Step 3: step3 (IcnDetailProcessor)]           │                            │
+  (Reads new ICNs from MCCA_TMP_CLM -&gt;         │                            │
+   Validates via ICNValidator -&gt; Inserts       │                            │
+   new ICN records into MCCA_CLM)              │                            │
+                  │                            │                            │
+                  ▼                            │                            │
+[Step 4: step4 (CsrDetailProcessor)]           │                            │
+  (Reads CSRs from MCCA_TMP_CLM joined with    │                            │
+   MCCA_CLM -&gt; Validates via CSRValidator -&gt;   │                            │
+   Updates MCCA_CLM &amp; Inserts MCCA_REMARKS)    │                            │
+                  │                            │                            │
+                  ▼                            │                            │
+[Step 5: step5 (OthrInjClmtsWriter)]           │                            │
+  (Copies MCCA_TMP_OTHR_INJ_CLMTS_PYMT         │                            │
+   for valid UNIQUE_IDs into                   │                            │
+   MCCA_OTHR_INJ_CLMTS_PYMT)                   │                            │
+                  │                            │                            │
+                  ▼                            │                            │
+[Step 6: step6 (UpdateIcnTmpClaimProcessor)]   │                            │
+  (Enriches MCCA_CLM where TXN_ID &gt; maxTxnId   │                            │
+   using MCCA_TMP_CLM_DTLS, sets INJ_DESC &amp;    │                            │
+   BRAIN_INJ_CD, runs ICN/CSR validators)      │                            │
+                  │                            │                            │
+                  ▼                            │                            │
+[Step 7: step7 (UpdateIcnCsrClaimProcessor)]   │                            │
+  (Updates active/open MCCA_CLM records        │                            │
+   for claims NOT in MCCA_TMP_CLM using        │                            │
+   MCCA_TMP_CLM_DTLS)                          │                            │
+                  │                            │                            │
+                  ▼                            ▼                            │
+[Step 8: step8 (CsrAmountUpdateWriter)] ◄──────┘                            │
+  (Updates TOT_RES_AMT &amp; CUM_AMT_PAID_TO_DT                                 │
+   in MCCA_CLM from MCCA_INCURRED_AMT_SUM)                                  │
+                  │                                                         │
+                  ▼                                                         │
+[Step 9: step9 (AmountUpdateProcessor)]                                     │
+  (Recalculates TOT_RES_AMT &amp; CUM_AMT_PAID_TO_DT                            │
+    across companion claims with same MCCA_CLM_NUM)                          │
+                  │                                                         │
+                  ▼                                                         ▼
+[Step 9b: updateRptdColumn (MccaClaimRptdProcessor)] ◄──────────────────────┘
+  (Marks RPTD_TO_MCCA=&apos;Y&apos; in MCCA_CLM_RPTD for claims present in MCCA_CLM)
+                  │
+                  ├──► (If DAILY or WEEKLY: Job Ends Here)
+                  │
+                  ▼ (If MONTHLY)
+[Step 10: clearIcnTempTables (DBUtils)]
+  (Deletes from MCCA_TMP_CLM, MCCA_TMP_OTHR_INJ_CLMTS_PYMT, MCCA_TMP_CLM_DTLS)
+                  │
+                  ▼
+[Step 11: icnCsrMail (MailImpl)]
+  (Sends monthly ICN/CSR batch completion email)</pre>
+<h2>3. Detailed Step-by-Step Business Logic, Conditions &amp; SQL Queries</h2>
+<h3>Step 1: ipmFactsMappingUpdateStep (IPMFactsMappingUtil.java [jobType=&apos;icn_csr&apos;])</h3>
+<p>Performs 7 staging sanity checks against <code>MCCA_TMP_CLM</code> and <code>MCCA_TMP_CLM_DTLS</code>:</p>
+<p>1. <code>getDuplicatesCountFromClaimMappingTable</code>: Checks <code>MCCA_TMP_CLM</code> and <code>MCCA_TMP_CLM_DTLS</code> for duplicate <code>IPM_CLM_NUM</code> or <code>CARRIER_CLM_NUM</code>.</p>
+<p>2. <code>getConflictsCountForClaimMapping</code>: Checks if <code>MCCA_TMP_CLM</code> or <code>MCCA_TMP_CLM_DTLS</code> conflicts with <code>IPM_FACTS_CLAIM_MAPPING_TABLE</code>.</p>
+<p>3. <code>getMissingIpmClaimsCountFromClaimMapping</code>: Checks if mapped claims in <code>MCCA_TMP_CLM</code> or <code>MCCA_TMP_CLM_DTLS</code> are missing <code>IPM_CLM_NUM</code>.</p>
+<p>4. <code>getCountOfClaimsWithFeatureCountMismatch</code>: Checks if any claim in <code>MCCA_TMP_CLM</code> or <code>MCCA_TMP_CLM_DTLS</code> has inconsistent <code>IPM_CLID_NUM</code> presence across claimants or against <code>IPM_FACTS_CLID_MAPPING_TABLE</code>.</p>
+<p>5. <code>getDuplicatesCountFromClidMappingTable</code>: Checks for duplicate <code>(CARRIER_CLM_NUM, CARRIER_CLMT_NUM)</code> or <code>(IPM_CLM_NUM, IPM_CLID_NUM)</code> in <code>MCCA_TMP_CLM</code> and <code>MCCA_TMP_CLM_DTLS</code>.</p>
+<p>6. <code>getConflictsCountForClidMapping</code>: Checks for conflicts with <code>IPM_FACTS_CLID_MAPPING_TABLE</code>.</p>
+<p>7. <code>getMissingIpmClidsCountFromClidMapping</code>: Checks for missing <code>IPM_CLM_NUM</code>/<code>IPM_CLID_NUM</code> on already-mapped CLIDs.</p>
+<p>- <b>Note on Empty Staging Tables</b>: If <code>SELECT COUNT(*) FROM mcca_tmp_clm</code> and <code>SELECT COUNT(*) FROM mcca_tmp_clm_dtls</code> are both <code>0</code>, <code>IPMFactsMappingUtil</code> logs <code>&quot;No data found in ICN CSR temp tables&quot;</code> and returns <code>COMPLETED</code> (continues gracefully).</p>
+<p>- Otherwise, increments <code>ipm_facts_mapping_version</code> in <code>MCCA_CODES_DECODE</code>, inserts new mappings into <code>IPM_FACTS_CLAIM_MAPPING_TABLE</code> and <code>IPM_FACTS_CLID_MAPPING_TABLE</code>, and updates converted claim/CLID numbers across the 9 target tables (<code>MCCA_CLM</code>, <code>MCCA_RFR</code>, <code>MCCA_RFR_PAYLOG</code>, <code>MCCA_LAST_BILL_DATE</code>, <code>MCCA_WRITE_OFF</code>, <code>MCCA_HIST</code>, <code>MCCA_REMARKS</code>, <code>MCCA_EXCEPTION</code>, <code>MCCA_OTHR_INJ_CLMTS_PYMT</code>).</p>
+<h3>Step 2: step2 — Copy Previous Submitted ICNs as CSR Baseline (CopyIcnProcessor.java &amp; CopyIcnWriter.java)</h3>
+<p>1. <b>Before-Step Max TXN Capture (<code>CopyIcnProcessor.getMaxId()</code>)</b>:</p>
+<p>- Executes <code>SELECT MAX(TXN_ID) FROM MCCA_CLM</code> and saves it in <code>UpdateIcnTmpClaimProcessor.maxTxnId</code>. All records inserted during this batch run will have <code>TXN_ID &gt; maxTxnId</code>.</p>
+<p>2. <b>Reader (<code>copyIcnDataReader</code> -&gt; <code>IcnCsrRowMapper.java</code>)</b>:</p>
+<p>- Selects existing claims in <code>MCCA_CLM</code> that also exist in <code>MCCA_TMP_CLM</code>, where <code>MCCA_CLM.TXN_ID</code> is the latest transaction for that <code>UNIQUE_ID</code> and <code>STATUS IN (&apos;SB&apos;, &apos;MN&apos;)</code> (Submitted or Manually Processed):</p>
+<p>```sql</p>
+<p>SELECT CLM.*</p>
+<p>FROM MCCA_CLM CLM, MCCA_TMP_CLM TMP</p>
+<p>WHERE CLM.UNIQUE_ID = TMP.CARRIER_CLM_NUM || &apos;-&apos; || TMP.CARRIER_CLMT_NUM</p>
+<p>AND CLM.TXN_ID IN (</p>
+<p>SELECT MAX(CLM2.TXN_ID) FROM MCCA_CLM CLM2 WHERE CLM.UNIQUE_ID = CLM2.UNIQUE_ID</p>
+<p>)</p>
+<p>AND CLM.STATUS IN (&apos;SB&apos;, &apos;MN&apos;);</p>
+<p>```</p>
+<p>3. <b>Processor (<code>CopyIcnProcessor.process</code>)</b>:</p>
+<p>- Checks if the claim has an exception blocking CSR creation (<code>IcnJdbcDaoImpl.isExceptionClaim</code>):</p>
+<p>```sql</p>
+<p>SELECT COUNT(*) FROM mcca.mcca_exception</p>
+<p>WHERE carrier_clm_num = ? AND carrier_clmt_num = ?</p>
+<p>AND exception_code IN (&apos;1&apos;, &apos;2&apos;) AND exception_value = &apos;Y&apos;;</p>
+<p>```</p>
+<p>- If <code>isExceptionClaim == true</code>: skips the record (<code>returns null</code>).</p>
+<p>- Otherwise, clones the <code>MCCA_CLM</code> record, sets <code>REC_TYPE = &apos;CSR&apos;</code>, <code>CRT_USER_ID = &apos;BATCH&apos;</code>, <code>MDFD_USER_ID = &apos;BATCH&apos;</code>, and inserts a new row into <code>MCCA_CLM</code> with <code>MCCA_CLM_TXN_ID_SEQ.NEXTVAL</code> via <code>CopyIcnWriter.java</code>.</p>
+<h3>Step 3: step3 — Process New ICN Claims (IcnDetailProcessor.java, ICNValidator.java, IcnDetailWriter.java)</h3>
+<p>1. <b>Reader (<code>icnDetailReader</code> -&gt; <code>IcnCsrRowMapper.java</code>)</b>:</p>
+<p>- Reads rows from <code>MCCA_TMP_CLM</code> whose <code>CARRIER_CLM_NUM || &apos;-&apos; || CARRIER_CLMT_NUM</code> does <b>NOT</b> yet exist in <code>MCCA_CLM</code>:</p>
+<p>```sql</p>
+<p>SELECT * FROM MCCA_TMP_CLM TMP</p>
+<p>WHERE TMP.CARRIER_CLM_NUM || &apos;-&apos; || TMP.CARRIER_CLMT_NUM NOT IN (</p>
+<p>SELECT DISTINCT UNIQUE_ID FROM MCCA_CLM</p>
+<p>);</p>
+<p>```</p>
+<p>2. <b>Processor (<code>IcnDetailProcessor.process</code>)</b>:</p>
+<p>- Checks <code>IcnJdbcDaoImpl.isExceptionClaim(carrierClaimNumber, carrierClaimantNumber)</code> (<code>EXCEPTION_CODE IN (&apos;1&apos;, &apos;2&apos;) AND EXCEPTION_VALUE = &apos;Y&apos;</code>). If <code>true</code>, skips the record (<code>returns null</code>).</p>
+<p>- Sets <code>uniqueId = carrierClaimNumber + &quot;-&quot; + carrierClaimantNumber</code>.</p>
+<p>- Sets <code>recordType = &quot;ICN&quot;</code> and <code>claimType = &quot;FACTS&quot;</code>.</p>
+<p>- Sets <code>reportedCatastrophicDate = new Date()</code>.</p>
+<p>- <b>Adjuster Phone Formatting (<code>formatPhoneNumber</code>)</b>:</p>
+<p>- If <code>adjusterPhone</code> is 10 digits (e.g. <code>&quot;3134906206&quot;</code>), formats as <code>&quot;313-490-6206&quot;</code>.</p>
+<p>- <b>Policy Number Formatting</b>:</p>
+<p>- Left-pads numeric policy numbers or formats per <code>ICN</code> rules.</p>
+<p>- <b>Checks for Companion Claims (<code>IcnJdbcDaoImpl.isCompanionClaim</code>)</b>:</p>
+<p>- Queries <code>MCCA_CLM</code> and <code>MCCA_TMP_CLM</code> to see if other claimants exist under the same <code>CARRIER_CLM_NUM</code>.</p>
+<p>- <b>Validation (<code>ICNValidator.validate(icn)</code>)</b>:</p>
+<p>- Validates mandatory ICN fields (<code>carrierId</code>, <code>naicCode</code>, <code>policyNumber</code>, <code>effectiveDate</code>, <code>expirationDate</code>, <code>dateOfLoss</code>, <code>insuredFirstName</code>/<code>LastName</code>, <code>claimantFirstName</code>/<code>LastName</code>, <code>birthDate</code>, <code>gender</code>, <code>injuryDescription</code>, <code>mccaStatusCode</code>, <code>mccaRelationCode</code>, <code>accidentDate</code>, <code>accidentDescription</code>, <code>totalReserve</code>, <code>cumulativePaidToDate</code>, etc.).</p>
+<p>- Populates <code>ERR_ELE_LIST</code> with comma-separated names of any missing/invalid fields.</p>
+<p>- Sets <code>statusIndicator = &quot;IC&quot;</code> (Incomplete) if mandatory fields are missing, or <code>&quot;PN&quot;</code> (Pending Examiner Review).</p>
+<p>3. <b>Writer (<code>IcnDetailWriter.java</code>)</b>:</p>
+<p>- Inserts the new ICN row into <code>MCCA_CLM</code> using <code>MCCA_CLM_TXN_ID_SEQ.NEXTVAL</code>.</p>
+<h3>Step 4: step4 — Process CSR Updates on Existing Claims (CsrDetailProcessor.java, CSRValidator.java, CsrDetailWriter.java)</h3>
+<p>1. <b>Reader (<code>csrDetailReader</code> -&gt; <code>CsrRowMapper.java</code>)</b>:</p>
+<p>- Joins <code>MCCA_TMP_CLM</code> with <code>MCCA_CLM</code> for claims that already exist in <code>MCCA_CLM</code> (either newly cloned in Step 2 or currently in <code>&apos;PN&apos;</code>/<code>&apos;IC&apos;</code> status at <code>MAX(TXN_ID)</code>):</p>
+<p>```sql</p>
+<p>SELECT TMP.*, CLM.TXN_ID AS CLM_TXN_ID, CLM.UNIQUE_ID AS CLM_UNIQUE_ID, CLM.STATUS AS CLM_STATUS</p>
+<p>FROM MCCA_TMP_CLM TMP, MCCA_CLM CLM</p>
+<p>WHERE CLM.UNIQUE_ID = TMP.CARRIER_CLM_NUM || &apos;-&apos; || TMP.CARRIER_CLMT_NUM</p>
+<p>AND CLM.TXN_ID IN (</p>
+<p>SELECT MAX(CLM2.TXN_ID) FROM MCCA_CLM CLM2 WHERE CLM2.UNIQUE_ID = CLM.UNIQUE_ID</p>
+<p>);</p>
+<p>```</p>
+<p>2. <b>Processor (<code>CsrDetailProcessor.process</code>)</b>:</p>
+<p>- Checks <code>CsrJdbcDaoImpl.isExceptionClaim</code> (<code>EXCEPTION_CODE IN (&apos;1&apos;, &apos;2&apos;) AND EXCEPTION_VALUE = &apos;Y&apos;</code>). If <code>true</code>, returns <code>null</code>.</p>
+<p>- Sets <code>recordType = &quot;CSR&quot;</code>, <code>claimType = &quot;FACTS&quot;</code>, and formats <code>adjusterPhone</code>.</p>
+<p>- <b>Change Reason Remark Insertion (<code>MCCA_REMARKS</code>)</b>:</p>
+<p>- If <code>changeReasonDescription != null &amp;&amp; !changeReasonDescription.isEmpty()</code> (e.g., <code>&quot;Reserve Increase&quot;</code>, <code>&quot;Fall Below&quot;</code>, <code>&quot;Reopen&quot;</code>), inserts a remark into <code>MCCA_REMARKS</code> via <code>CsrJdbcDaoImpl.insertRemarks</code>:</p>
+<p>```sql</p>
+<p>INSERT INTO mcca.mcca_remarks (REMARK_SEQ_NUM, UNIQUE_ID, REMARKS, CRT_DTTM, CRT_USER_ID, MDFD_DTTM, MDFD_USER_ID)</p>
+<p>VALUES (mcca.mcca_remark_seq.NEXTVAL, :uniqueId, :remarks, SYSDATE, &apos;BATCH&apos;, SYSDATE, &apos;BATCH&apos;);</p>
+<p>```</p>
+<p>- Runs <code>CSRValidator.validate(csr)</code> to populate <code>ERR_ELE_LIST</code> and set <code>STATUS</code> (<code>&apos;IC&apos;</code> or <code>&apos;PN&apos;</code>).</p>
+<p>3. <b>Writer (<code>CsrDetailWriter.java</code>)</b>:</p>
+<p>- Updates the latest <code>TXN_ID</code> row in <code>MCCA_CLM</code> with the updated reserve, paid, adjuster, and status fields from <code>MCCA_TMP_CLM</code>.</p>
+<h3>Step 5: step5 — Copy Other Injured Claimants Payments (OthrInjClmtsPymtRowMapper.java &amp; OthrInjClmtsWriter.java)</h3>
+<p>1. <b>Reader (<code>othrInjClmtsReader</code>)</b>:</p>
+<p>- Reads rows from <code>MCCA_TMP_OTHR_INJ_CLMTS_PYMT</code> where <code>CARRIER_CLM_NUM || &apos;-&apos; || CARRIER_CLMT_NUM</code> exists in <code>MCCA_CLM</code>.</p>
+<p>2. <b>Before-Write Cleanup &amp; Insert (<code>OthrInjClmtsWriter.java</code> &amp; <code>OthrInjClmtsDaoImpl.java</code>)</b>:</p>
+<p>- Deletes existing records in <code>MCCA_OTHR_INJ_CLMTS_PYMT</code> for the matching <code>UNIQUE_ID</code> and inserts the refreshed other-injured-claimant payment rows into <code>MCCA_OTHR_INJ_CLMTS_PYMT</code>.</p>
+<h3>Step 6: step6 — Enrich Newly Processed ICN/CSR Rows from MCCA_TMP_CLM_DTLS (UpdateIcnTmpClaimProcessor.java &amp; UpdateIcnTmpClaimDetailWriter.java)</h3>
+<p>1. <b>Reader (<code>updateIcnTmpClaimReader</code> -&gt; <code>TmpClaimDetailRowMapper.java</code>)</b>:</p>
+<p>- Joins <code>MCCA_CLM</code> (where <code>TXN_ID &gt; maxTxnId</code> captured at the start of Step 2) with <code>MCCA_TMP_CLM_DTLS</code>.</p>
+<p>2. <b>Processor (<code>UpdateIcnTmpClaimProcessor.process</code>)</b>:</p>
+<p>- Concatenates up to 3 ICD codes and descriptions into <code>injuryDescription</code>:</p>
+<p><code>icd1Code + &quot; - &quot; + icd1Desc + &quot;, &quot; + icd2Code + &quot; - &quot; + icd2Desc + &quot;, &quot; + icd3Code + &quot; - &quot; + icd3Desc</code> (truncated to max <code>200</code> characters).</p>
+<p>- <b>Brain Injury Code Logic</b>:</p>
+<p>- If <code>REC_TYPE == &apos;ICN&apos;</code> and any of <code>icd1Code</code>, <code>icd2Code</code>, <code>icd3Code</code> is in <code>BatchConstants.CLOSED_HEAD_INJURY_CODES</code> (<code>{&quot;854.0&quot;,&quot;854.00&quot;,&quot;854.01&quot;,&quot;854.02&quot;,&quot;854.03&quot;,&quot;854.04&quot;,&quot;854.05&quot;,&quot;854.06&quot;,&quot;854.09&quot;,&quot;S06.9X9A&quot;,&quot;S06.2X9A&quot;}</code>), sets <code>brainInjuryCode = &quot;CHI&quot;</code>.</p>
+<p>- Re-runs <code>ICNValidator.validate</code> (if <code>REC_TYPE == &apos;ICN&apos;</code>) or <code>CSRValidator.validate</code> (if <code>REC_TYPE == &apos;CSR&apos;</code>) to refresh <code>ERR_ELE_LIST</code> and <code>STATUS</code>.</p>
+<p>3. <b>Writer (<code>UpdateIcnTmpClaimDetailWriter.java</code>)</b>:</p>
+<p>- Updates <code>MCCA_CLM</code> with the enriched claimant, insured, policy, accident, and injury details from <code>MCCA_TMP_CLM_DTLS</code>.</p>
+<h3>Step 7: step7 — Update Open/Existing Claims Not in MCCA_TMP_CLM (UpdateIcnCsrClaimProcessor.java &amp; UpdateIcnCsrClaimDetailWriter.java)</h3>
+<p>1. <b>Reader (<code>updateIcnCsrClaimReader</code> -&gt; <code>IcnCsrClaimDetailRowMapper.java</code>)</b>:</p>
+<p>- Selects latest <code>TXN_ID</code> rows in <code>MCCA_CLM</code> (<code>WHERE STATUS IN (&apos;IC&apos;, &apos;PN&apos;)</code>) that were <b>not</b> part of <code>MCCA_TMP_CLM</code> in this run, joined with <code>MCCA_TMP_CLM_DTLS</code>.</p>
+<p>2. <b>Processor (<code>UpdateIcnCsrClaimProcessor.process</code>)</b>:</p>
+<p>- Updates demographic, adjuster, policy, and injury fields from <code>MCCA_TMP_CLM_DTLS</code> (without overwriting manually entered UI fields if already populated), re-validates via <code>ICNValidator</code> / <code>CSRValidator</code>, and writes back to <code>MCCA_CLM</code> via <code>UpdateIcnCsrClaimDetailWriter.java</code>.</p>
+<h3>Step 8: step8 — Update Reserve &amp; Cumulative Paid Amounts (CsrAmountUpdateRowMapper.java &amp; CsrAmountUpdateWriter.java)</h3>
+<p>*(Runs in both <code>MONTHLY</code> and <code>DAILY</code> modes)*</p>
+<p>1. Reads incurred amount summaries from <code>MCCA_INCURRED_AMT_SUM</code> joined with <code>MCCA_CLM</code> (latest <code>TXN_ID</code> where <code>STATUS IN (&apos;IC&apos;, &apos;PN&apos;)</code>).</p>
+<p>2. Updates <code>TOT_RES_AMT</code> (Total Reserve) and <code>CUM_AMT_PAID_TO_DT</code> (Cumulative Paid to Date) in <code>MCCA_CLM</code>.</p>
+<h3>Step 9: step9 — Companion Claim Amount Aggregation (AmountUpdateProcessor.java &amp; CsrAmountUpdateWriter.java)</h3>
+<p>*(Runs in both <code>MONTHLY</code> and <code>DAILY</code> modes)*</p>
+<p>1. Reads claims in <code>MCCA_CLM</code> sharing the same <code>MCCA_CLM_NUM</code> (companion claims where <code>MCCA_CLM_NUM</code> ends with <code>&apos;A&apos;</code>, <code>&apos;B&apos;</code>, etc. or shares the base claim number).</p>
+<p>2. Aggregates <code>TOT_RES_AMT</code> and <code>CUM_AMT_PAID_TO_DT</code> across the companion group via <code>IcnJdbcDaoImpl.getIncurredAmount</code> and updates <code>MCCA_CLM</code>.</p>
+<h3>Step 9b: updateRptdColumn — Update Reported-to-MCCA Flag (MccaClaimRptdProcessor.java &amp; MccaClaimRptdWriter.java)</h3>
+<p>*(Runs in <code>MONTHLY</code>, <code>DAILY</code>, and <code>WEEKLY</code> modes)*</p>
+<p>1. <b>Reader (<code>updateRptdColumnReader</code> -&gt; <code>UpdateRptdRowMapper.java</code>)</b>:</p>
+<p>- Reads rows from <code>MCCA_CLM_RPTD</code> where <code>RPTD_TO_MCCA = &apos;N&apos;</code> (or not <code>&apos;Y&apos;</code>).</p>
+<p>2. <b>Processor (<code>MccaClaimRptdProcessor.process</code>)</b>:</p>
+<p>- Calls <code>MccaClaimDaoImpl.getClaimCount(carrierClaimNumber, carrierClaimantNumber)</code>:</p>
+<p>```sql</p>
+<p>SELECT COUNT(*) FROM mcca.mcca_clm</p>
+<p>WHERE carrier_clm_num = ? AND carrier_clmt_num = ?;</p>
+<p>```</p>
+<p>- If <code>count &gt; 0</code>: sets <code>reportedToMcca = &quot;Y&quot;</code> and returns the record to <code>MccaClaimRptdWriter</code>.</p>
+<p>- If <code>count == 0</code>: returns <code>null</code> (leaves <code>RPTD_TO_MCCA</code> unchanged).</p>
+<p>3. <b>Writer (<code>MccaClaimRptdWriter.java</code>)</b>:</p>
+<p>```sql</p>
+<p>UPDATE MCCA_CLM_RPTD</p>
+<p>SET RPTD_TO_MCCA = :reportedToMcca, MDFD_DTTM = SYSDATE</p>
+<p>WHERE CARRIER_CLM_NUM = :carrierClaimNumber AND CARRIER_CLMT_NUM = :carrierClaimantNumber;</p>
+<p>```</p>
+<h3>Step 10: clearIcnTempTables (DBUtils.java)</h3>
+<p>*(Runs in <code>MONTHLY</code> mode only)*</p>
+<p>Deletes all staging rows from the 3 ICN/CSR temporary tables:</p>
+<pre>DELETE FROM MCCA_TMP_CLM;
+DELETE FROM MCCA_TMP_OTHR_INJ_CLMTS_PYMT;
+DELETE FROM MCCA_TMP_CLM_DTLS;</pre>
+<h3>Step 11: icnCsrMail (MailImpl.java)</h3>
+<p>*(Runs in <code>MONTHLY</code> mode only)*</p>
+<p>Sends the monthly completion email notification to configured recipients.</p>
+</body></html>
