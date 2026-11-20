@@ -61,20 +61,20 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         """
         sql_clid_map = """
             SELECT COUNT(*) FROM (
-                SELECT COUNT(FACTS_CLID) AS CNT
+                SELECT COUNT(CLID) AS CNT
                 FROM IPM_FACTS_CLID_MAPPING_TABLE
                 WHERE IPM_CLID IS NOT NULL
-                GROUP BY FACTS_CLAIM_NUMBER, IPM_CLID
-                HAVING COUNT(FACTS_CLID) > 1
+                GROUP BY CARRIER_CLM_NUM, IPM_CLID
+                HAVING COUNT(CLID) > 1
             ) sub3
         """
         sql_claim_map = """
             SELECT COUNT(*) FROM (
-                SELECT COUNT(FACTS_CLAIM_NUMBER) AS CNT
+                SELECT COUNT(CARRIER_CLM_NUM) AS CNT
                 FROM IPM_FACTS_CLAIM_MAPPING_TABLE
-                WHERE IPM_CLAIM_NUMBER IS NOT NULL AND IPM_CLAIM_NUMBER != ''
-                GROUP BY IPM_CLAIM_NUMBER
-                HAVING COUNT(FACTS_CLAIM_NUMBER) > 1
+                WHERE IPM_CLM_NUM IS NOT NULL AND IPM_CLM_NUM != ''
+                GROUP BY IPM_CLM_NUM
+                HAVING COUNT(CARRIER_CLM_NUM) > 1
             ) sub4
         """
         sql_fac_tmp_rfr = """
@@ -106,8 +106,8 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         """
         sql = f"""
             INSERT INTO IPM_FACTS_CLAIM_MAPPING_TABLE (
-                IPM_CLAIM_NUMBER,
-                FACTS_CLAIM_NUMBER,
+                IPM_CLM_NUM,
+                CARRIER_CLM_NUM,
                 CONV_DT,
                 VERSION_NUMBER,
                 LST_UPDATE_TIMESTAMP
@@ -120,8 +120,8 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                 SYSDATE
             FROM {source_table} clm
             LEFT JOIN IPM_FACTS_CLAIM_MAPPING_TABLE map
-              ON map.IPM_CLAIM_NUMBER = clm.PREV_IPM_CLMNBR
-            WHERE map.IPM_CLAIM_NUMBER IS NULL
+              ON map.IPM_CLM_NUM = clm.PREV_IPM_CLMNBR
+            WHERE map.IPM_CLM_NUM IS NULL
               AND clm.PREV_IPM_CLMNBR IS NOT NULL
         """
         self.update(sql)
@@ -135,9 +135,9 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
             sql = f"""
                 UPDATE {table} target
                 SET (target.CARRIER_CLM_NUM, target.CONV_IND) = (
-                    SELECT map.FACTS_CLAIM_NUMBER, 'Y'
+                    SELECT map.CARRIER_CLM_NUM, 'Y'
                     FROM IPM_FACTS_CLAIM_MAPPING_TABLE map
-                    WHERE map.IPM_CLAIM_NUMBER = target.CARRIER_CLM_NUM
+                    WHERE map.IPM_CLM_NUM = target.CARRIER_CLM_NUM
                       AND map.VERSION_NUMBER = (
                           SELECT CAST(DECODE AS INTEGER)
                           FROM MCCA_CODES_DECODE
@@ -147,7 +147,7 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                 WHERE EXISTS (
                     SELECT 1
                     FROM IPM_FACTS_CLAIM_MAPPING_TABLE map
-                    WHERE map.IPM_CLAIM_NUMBER = target.CARRIER_CLM_NUM
+                    WHERE map.IPM_CLM_NUM = target.CARRIER_CLM_NUM
                       AND map.VERSION_NUMBER = (
                           SELECT CAST(DECODE AS INTEGER)
                           FROM MCCA_CODES_DECODE
@@ -163,17 +163,17 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         Exact port of IPMFactsMappingUpdateDaoImpl.getClaimNumberMapping().
         """
         sql = """
-            SELECT IPM_CLAIM_NUMBER, FACTS_CLAIM_NUMBER
+            SELECT IPM_CLM_NUM, CARRIER_CLM_NUM
             FROM IPM_FACTS_CLAIM_MAPPING_TABLE
-            WHERE IPM_CLAIM_NUMBER IS NOT NULL
-              AND FACTS_CLAIM_NUMBER IS NOT NULL
+            WHERE IPM_CLM_NUM IS NOT NULL
+              AND CARRIER_CLM_NUM IS NOT NULL
         """
         rows = self.query_for_list(sql)
         facts_ipm: Dict[str, str] = {}
         ipm_facts: Dict[str, str] = {}
         for row in rows:
-            ipm_no = row["IPM_CLAIM_NUMBER"]
-            facts_no = row["FACTS_CLAIM_NUMBER"]
+            ipm_no = row["IPM_CLM_NUM"]
+            facts_no = row["CARRIER_CLM_NUM"]
             facts_ipm[facts_no] = ipm_no
             ipm_facts[ipm_no] = facts_no
         return facts_ipm, ipm_facts
@@ -186,9 +186,9 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         clid_col = "CARRIER_CLMT_NUM" if source_table == "MCCA_FAC_TMP_RFR_PAYLOG" else "CLID"
         sql = f"""
             INSERT INTO IPM_FACTS_CLID_MAPPING_TABLE (
-                FACTS_CLAIM_NUMBER,
+                CARRIER_CLM_NUM,
                 IPM_CLID,
-                FACTS_CLID,
+                CLID,
                 VERSION_NUMBER,
                 LST_UPDATE_TIMESTAMP
             )
@@ -200,7 +200,7 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                 SYSDATE
             FROM {source_table} clmnt
             LEFT JOIN IPM_FACTS_CLID_MAPPING_TABLE map
-              ON map.FACTS_CLAIM_NUMBER = clmnt.CARRIER_CLM_NUM
+              ON map.CARRIER_CLM_NUM = clmnt.CARRIER_CLM_NUM
              AND map.IPM_CLID = clmnt.IPM_CLAIMANT_NO
             WHERE map.IPM_CLID IS NULL
               AND clmnt.IPM_CLAIMANT_NO IS NOT NULL
@@ -217,9 +217,9 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
             sql = f"""
                 UPDATE {table} target
                 SET (target.CLID, target.CONV_IND) = (
-                    SELECT map.FACTS_CLID, 'N'
+                    SELECT map.CLID, 'N'
                     FROM IPM_FACTS_CLID_MAPPING_TABLE map
-                    WHERE map.FACTS_CLAIM_NUMBER = target.CARRIER_CLM_NUM
+                    WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                       AND CAST(map.IPM_CLID AS VARCHAR(50)) = target.CLID
                       AND map.VERSION_NUMBER = (
                           SELECT CAST(DECODE AS INTEGER)
@@ -231,7 +231,7 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                   AND EXISTS (
                       SELECT 1
                       FROM IPM_FACTS_CLID_MAPPING_TABLE map
-                      WHERE map.FACTS_CLAIM_NUMBER = target.CARRIER_CLM_NUM
+                      WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                         AND CAST(map.IPM_CLID AS VARCHAR(50)) = target.CLID
                         AND map.VERSION_NUMBER = (
                             SELECT CAST(DECODE AS INTEGER)
@@ -245,9 +245,9 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         sql_paylog = """
             UPDATE MCCA_RFR_PAYLOG target
             SET (target.CARRIER_CLMT_NUM, target.CONV_IND) = (
-                SELECT map.FACTS_CLID, 'N'
+                SELECT map.CLID, 'N'
                 FROM IPM_FACTS_CLID_MAPPING_TABLE map
-                WHERE map.FACTS_CLAIM_NUMBER = target.CARRIER_CLM_NUM
+                WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                   AND map.IPM_CLID = target.CARRIER_CLMT_NUM
                   AND map.VERSION_NUMBER = (
                       SELECT CAST(DECODE AS INTEGER)
@@ -259,7 +259,7 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
               AND EXISTS (
                   SELECT 1
                   FROM IPM_FACTS_CLID_MAPPING_TABLE map
-                  WHERE map.FACTS_CLAIM_NUMBER = target.CARRIER_CLM_NUM
+                  WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                     AND map.IPM_CLID = target.CARRIER_CLMT_NUM
                     AND map.VERSION_NUMBER = (
                         SELECT CAST(DECODE AS INTEGER)
@@ -276,18 +276,18 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         Exact port of IPMFactsMappingUpdateDaoImpl.getClaimantNumberMapping().
         """
         sql = """
-            SELECT FACTS_CLAIM_NUMBER, IPM_CLID, FACTS_CLID
+            SELECT CARRIER_CLM_NUM, IPM_CLID, CLID
             FROM IPM_FACTS_CLID_MAPPING_TABLE
-            WHERE FACTS_CLAIM_NUMBER IS NOT NULL
+            WHERE CARRIER_CLM_NUM IS NOT NULL
               AND IPM_CLID IS NOT NULL
-              AND FACTS_CLID IS NOT NULL
+              AND CLID IS NOT NULL
         """
         rows = self.query_for_list(sql)
         result: Dict[str, Dict[str, str]] = {}
         for row in rows:
-            claim_no = row["FACTS_CLAIM_NUMBER"]
+            claim_no = row["CARRIER_CLM_NUM"]
             ipm_clid = str(row["IPM_CLID"])
-            facts_clid = str(row["FACTS_CLID"])
+            facts_clid = str(row["CLID"])
             if claim_no not in result:
                 result[claim_no] = {}
             result[claim_no][facts_clid] = ipm_clid
