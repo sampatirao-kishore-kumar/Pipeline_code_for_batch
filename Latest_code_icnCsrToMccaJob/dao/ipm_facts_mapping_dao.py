@@ -108,14 +108,12 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
             INSERT INTO IPM_FACTS_CLAIM_MAPPING_TABLE (
                 IPM_CLM_NUM,
                 CARRIER_CLM_NUM,
-                CONV_DT,
                 VERSION_NUMBER,
                 LST_UPDATE_TIMESTAMP
             )
             SELECT DISTINCT
                 clm.PREV_IPM_CLMNBR,
                 clm.CARRIER_CLM_NUM,
-                clm.CONV_DT,
                 (SELECT CAST(DECODE AS INTEGER) FROM MCCA_CODES_DECODE WHERE CATEGORY = 'ipm_facts_mapping_version'),
                 SYSDATE
             FROM {source_table} clm
