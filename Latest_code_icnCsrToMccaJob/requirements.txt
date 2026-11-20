@@ -1,0 +1,6 @@
+# Database Drivers (AlloyDB PostgreSQL & Legacy Oracle)
+psycopg2-binary>=2.9.9
+oracledb>=2.0.0
+
+# Date & Relative Month Calculations (MccaBatchUtil.calculateCsrDueDt)
+python-dateutil>=2.9.0
