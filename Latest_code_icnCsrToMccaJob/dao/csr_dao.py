@@ -278,10 +278,10 @@ class CsrJdbcDaoImpl(BaseJdbcDao):
 
     def process_new_clid_exception(self) -> Dict[str, str]:
         """
-        Returns CARRIER_CLM_NUM -> CLID map from MCCA_EXCEPTION where EXCEPTION_CD = '8'.
+        Returns CARRIER_CLM_NUM -> CLID map from MCCA_EXCEPTION where EXCEPTION_CODE = '8'.
         Exact port of CsrJdbcDaoImpl.processNewClidException().
         """
-        sql = "SELECT CARRIER_CLM_NUM, CLID FROM MCCA_EXCEPTION WHERE EXCEPTION_CD = ?"
+        sql = "SELECT CARRIER_CLM_NUM, CLID FROM MCCA_EXCEPTION WHERE EXCEPTION_CODE = ?"
         rows = self.query_for_list(sql, [BatchConstants.PROCESS_NEW_CLID_EXCEPTION_CODE])
         return {
             str(r["CARRIER_CLM_NUM"]): str(r["CLID"])

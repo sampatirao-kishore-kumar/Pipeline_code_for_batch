@@ -226,10 +226,10 @@ class IcnJdbcDaoImpl(BaseJdbcDao):
 
     def stop_icn_csr_exception(self) -> List[str]:
         """
-        Returns CARRIER_CLM_NUM list from MCCA_EXCEPTION where EXCEPTION_CD = '9'.
+        Returns CARRIER_CLM_NUM list from MCCA_EXCEPTION where EXCEPTION_CODE = '9'.
         Exact port of IcnJdbcDaoImpl.stopIcnCsrException().
         """
-        sql = "SELECT DISTINCT CARRIER_CLM_NUM FROM MCCA_EXCEPTION WHERE EXCEPTION_CD = ?"
+        sql = "SELECT DISTINCT CARRIER_CLM_NUM FROM MCCA_EXCEPTION WHERE EXCEPTION_CODE = ?"
         rows = self.query_for_list(sql, [BatchConstants.STOP_ICN_CSR_EXCEPTION_CODE])
         return [str(r["CARRIER_CLM_NUM"]) for r in rows if r.get("CARRIER_CLM_NUM")]
 
