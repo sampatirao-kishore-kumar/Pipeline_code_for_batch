@@ -107,15 +107,11 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         sql = f"""
             INSERT INTO IPM_FACTS_CLAIM_MAPPING_TABLE (
                 IPM_CLM_NUM,
-                CARRIER_CLM_NUM,
-                VERSION_NUMBER,
-                LST_UPDATE_TIMESTAMP
+                CARRIER_CLM_NUM
             )
             SELECT DISTINCT
                 clm.PREV_IPM_CLMNBR,
-                clm.CARRIER_CLM_NUM,
-                (SELECT CAST(DECODE AS INTEGER) FROM MCCA_CODES_DECODE WHERE CATEGORY = 'ipm_facts_mapping_version'),
-                SYSDATE
+                clm.CARRIER_CLM_NUM
             FROM {source_table} clm
             LEFT JOIN IPM_FACTS_CLAIM_MAPPING_TABLE map
               ON map.IPM_CLM_NUM = clm.PREV_IPM_CLMNBR
@@ -136,21 +132,11 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                     SELECT map.CARRIER_CLM_NUM, 'Y'
                     FROM IPM_FACTS_CLAIM_MAPPING_TABLE map
                     WHERE map.IPM_CLM_NUM = target.CARRIER_CLM_NUM
-                      AND map.VERSION_NUMBER = (
-                          SELECT CAST(DECODE AS INTEGER)
-                          FROM MCCA_CODES_DECODE
-                          WHERE CATEGORY = 'ipm_facts_mapping_version'
-                      )
                 )
                 WHERE EXISTS (
                     SELECT 1
                     FROM IPM_FACTS_CLAIM_MAPPING_TABLE map
                     WHERE map.IPM_CLM_NUM = target.CARRIER_CLM_NUM
-                      AND map.VERSION_NUMBER = (
-                          SELECT CAST(DECODE AS INTEGER)
-                          FROM MCCA_CODES_DECODE
-                          WHERE CATEGORY = 'ipm_facts_mapping_version'
-                      )
                 )
             """
             self.update(sql)
@@ -186,16 +172,12 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
             INSERT INTO IPM_FACTS_CLID_MAPPING_TABLE (
                 CARRIER_CLM_NUM,
                 IPM_CLID,
-                CLID,
-                VERSION_NUMBER,
-                LST_UPDATE_TIMESTAMP
+                CLID
             )
             SELECT DISTINCT
                 clmnt.CARRIER_CLM_NUM,
                 clmnt.IPM_CLAIMANT_NO,
-                clmnt.{clid_col},
-                (SELECT CAST(DECODE AS INTEGER) FROM MCCA_CODES_DECODE WHERE CATEGORY = 'ipm_facts_mapping_version'),
-                SYSDATE
+                clmnt.{clid_col}
             FROM {source_table} clmnt
             LEFT JOIN IPM_FACTS_CLID_MAPPING_TABLE map
               ON map.CARRIER_CLM_NUM = clmnt.CARRIER_CLM_NUM
@@ -219,11 +201,6 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                     FROM IPM_FACTS_CLID_MAPPING_TABLE map
                     WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                       AND CAST(map.IPM_CLID AS VARCHAR(50)) = target.CLID
-                      AND map.VERSION_NUMBER = (
-                          SELECT CAST(DECODE AS INTEGER)
-                          FROM MCCA_CODES_DECODE
-                          WHERE CATEGORY = 'ipm_facts_mapping_version'
-                      )
                 )
                 WHERE target.CONV_IND = 'Y'
                   AND EXISTS (
@@ -231,11 +208,6 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                       FROM IPM_FACTS_CLID_MAPPING_TABLE map
                       WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                         AND CAST(map.IPM_CLID AS VARCHAR(50)) = target.CLID
-                        AND map.VERSION_NUMBER = (
-                            SELECT CAST(DECODE AS INTEGER)
-                            FROM MCCA_CODES_DECODE
-                            WHERE CATEGORY = 'ipm_facts_mapping_version'
-                        )
                   )
             """
             self.update(sql)
@@ -247,11 +219,6 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                 FROM IPM_FACTS_CLID_MAPPING_TABLE map
                 WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                   AND map.IPM_CLID = target.CARRIER_CLMT_NUM
-                  AND map.VERSION_NUMBER = (
-                      SELECT CAST(DECODE AS INTEGER)
-                      FROM MCCA_CODES_DECODE
-                      WHERE CATEGORY = 'ipm_facts_mapping_version'
-                  )
             )
             WHERE target.CONV_IND = 'Y'
               AND EXISTS (
@@ -259,11 +226,6 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
                   FROM IPM_FACTS_CLID_MAPPING_TABLE map
                   WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                     AND map.IPM_CLID = target.CARRIER_CLMT_NUM
-                    AND map.VERSION_NUMBER = (
-                        SELECT CAST(DECODE AS INTEGER)
-                        FROM MCCA_CODES_DECODE
-                        WHERE CATEGORY = 'ipm_facts_mapping_version'
-                    )
               )
         """
         self.update(sql_paylog)
