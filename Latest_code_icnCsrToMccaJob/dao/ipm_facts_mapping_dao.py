@@ -128,11 +128,12 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         for table in self.TARGET_TABLES_CLAIM:
             sql = f"""
                 UPDATE {table} target
-                SET (target.CARRIER_CLM_NUM, target.CONV_IND) = (
-                    SELECT map.CARRIER_CLM_NUM, 'Y'
+                SET CARRIER_CLM_NUM = (
+                    SELECT map.CARRIER_CLM_NUM
                     FROM IPM_FACTS_CLAIM_MAPPING_TABLE map
                     WHERE map.IPM_CLM_NUM = target.CARRIER_CLM_NUM
-                )
+                ),
+                CONV_IND = 'Y'
                 WHERE EXISTS (
                     SELECT 1
                     FROM IPM_FACTS_CLAIM_MAPPING_TABLE map
@@ -196,12 +197,13 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
         for table in self.TARGET_TABLES_CLID:
             sql = f"""
                 UPDATE {table} target
-                SET (target.CLID, target.CONV_IND) = (
-                    SELECT map.CLID, 'N'
+                SET CLID = (
+                    SELECT map.CLID
                     FROM IPM_FACTS_CLID_MAPPING_TABLE map
                     WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                       AND CAST(map.IPM_CLID AS VARCHAR(50)) = target.CLID
-                )
+                ),
+                CONV_IND = 'N'
                 WHERE target.CONV_IND = 'Y'
                   AND EXISTS (
                       SELECT 1
@@ -214,12 +216,13 @@ class IPMFactsMappingUpdateDaoImpl(BaseJdbcDao):
 
         sql_paylog = """
             UPDATE MCCA_RFR_PAYLOG target
-            SET (target.CARRIER_CLMT_NUM, target.CONV_IND) = (
-                SELECT map.CLID, 'N'
+            SET CARRIER_CLMT_NUM = (
+                SELECT map.CLID
                 FROM IPM_FACTS_CLID_MAPPING_TABLE map
                 WHERE map.CARRIER_CLM_NUM = target.CARRIER_CLM_NUM
                   AND map.IPM_CLID = target.CARRIER_CLMT_NUM
-            )
+            ),
+            CONV_IND = 'N'
             WHERE target.CONV_IND = 'Y'
               AND EXISTS (
                   SELECT 1
