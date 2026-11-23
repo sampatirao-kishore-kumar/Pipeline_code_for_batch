@@ -53,6 +53,23 @@ def adapt_sql(sql: str, dialect: str = "postgresql") -> str:
         adapted,
         flags=re.IGNORECASE,
     )
+
+    # Postgres CONCAT for specific batch_date queries:
+    # THEN (12 || (expr - 1)) -> THEN CONCAT('12', expr - 1)
+    adapted = re.sub(
+        r"THEN\s*\(\s*12\s*\|\|\s*\((.*?-\s*1)\)\s*\)",
+        r"THEN CONCAT('12', \1)",
+        adapted,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # ELSE ((expr - 1) || expr) -> ELSE CONCAT(expr - 1, expr)
+    adapted = re.sub(
+        r"ELSE\s*\(\s*\((.*?-\s*1)\)\s*\|\|\s*(.*?)\s*\)\s+END",
+        r"ELSE CONCAT(\1, \2)\nEND",
+        adapted,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    
     return adapted
 
 
