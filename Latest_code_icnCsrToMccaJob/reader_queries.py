@@ -503,6 +503,28 @@ def map_tmp_claim_detail_row(row: Dict[str, Any]) -> TmpIcnDetail:
 # ==============================================================================
 def get_step6_update_icn_claim_sql() -> str:
     return """
+        WITH Latest_ICN AS (
+            SELECT DISTINCT ON (CARRIER_CLM_NUM)
+                CARRIER_CLM_NUM, REC_TYP, STATUS
+            FROM MCCA_ICN
+            WHERE REC_TYP = 'ICN'
+            ORDER BY CARRIER_CLM_NUM, TXN_ID DESC
+        ),
+        Latest_CSR AS (
+            SELECT DISTINCT ON (CARRIER_CLM_NUM)
+                CARRIER_CLM_NUM, CLOSED_IND, STATUS_LST
+            FROM MCCA_CSR
+            WHERE CLID = '0' AND REC_TYP = 'ICN'
+            ORDER BY CARRIER_CLM_NUM, TXN_ID DESC
+        ),
+        Latest_Claim AS (
+            SELECT DISTINCT ON (CARRIER_CLM_NUM)
+                CARRIER_CLM_NUM, MCCA_CLM_NUM, RETENTION, THRESHOLD,
+                DATE_OF_LOSS, POLICY_INCEPTION_DATE, POLICY_END_DATE,
+                CARRIER_PLCY_NUM, LINK_ID
+            FROM MCCA_CLAIM
+            ORDER BY CARRIER_CLM_NUM, TXN_ID DESC
+        )
         SELECT DISTINCT
             T.CARRIER_CLM_NUM,
             T.MCCA_CLM_NUM,
@@ -514,39 +536,13 @@ def get_step6_update_icn_claim_sql() -> str:
             T.CARRIER_PLCY_NUM,
             T.LINK_ID,
             ICN.REC_TYP
-        FROM MCCA_CLAIM T,
-             (
-                 SELECT I.CARRIER_CLM_NUM, I.REC_TYP
-                 FROM MCCA_ICN I,
-                      MCCA_CSR CSR
-                 WHERE I.TXN_ID = (
-                     SELECT MAX(ICN1.TXN_ID)
-                     FROM MCCA_ICN ICN1
-                     WHERE ICN1.CARRIER_CLM_NUM = I.CARRIER_CLM_NUM
-                       AND ICN1.REC_TYP = 'ICN'
-                 )
-                   AND CSR.CARRIER_CLM_NUM = I.CARRIER_CLM_NUM
-                   AND (CSR.CLOSED_IND IS NULL OR CSR.CLOSED_IND = 'N')
-                   AND CSR.CLID = '0'
-                   AND CSR.REC_TYP = 'ICN'
-                   AND CSR.STATUS_LST = 'Open'
-                   AND I.REC_TYP = 'ICN'
-                   AND I.STATUS = 'PN'
-                   AND CSR.TXN_ID = (
-                       SELECT MAX(CSR1.TXN_ID)
-                       FROM MCCA_CSR CSR1
-                       WHERE CSR1.CARRIER_CLM_NUM = CSR.CARRIER_CLM_NUM
-                         AND CSR1.CLID = '0'
-                         AND CSR1.REC_TYP = 'ICN'
-                   )
-             ) ICN
-        WHERE T.CARRIER_CLM_NUM = ICN.CARRIER_CLM_NUM
+        FROM Latest_Claim T
+        JOIN Latest_ICN ICN ON T.CARRIER_CLM_NUM = ICN.CARRIER_CLM_NUM
+        JOIN Latest_CSR CSR ON T.CARRIER_CLM_NUM = CSR.CARRIER_CLM_NUM
+        WHERE ICN.STATUS = 'PN'
+          AND (CSR.CLOSED_IND IS NULL OR CSR.CLOSED_IND = 'N')
+          AND CSR.STATUS_LST = 'Open'
           AND REGEXP_LIKE(T.CARRIER_CLM_NUM, '^([4-9]{1})\\d{8}$')
-          AND T.TXN_ID = (
-              SELECT MAX(T1.TXN_ID)
-              FROM MCCA_CLAIM T1
-              WHERE T1.CARRIER_CLM_NUM = T.CARRIER_CLM_NUM
-          )
     """
 
 
@@ -571,6 +567,22 @@ def map_icn_csr_claim_detail_row(row: Dict[str, Any]) -> IcnCsrDetail:
 # ==============================================================================
 def get_step7_update_csr_claim_sql() -> str:
     return """
+        WITH Latest_CSR AS (
+            SELECT DISTINCT ON (CARRIER_CLM_NUM, CLID)
+                CARRIER_CLM_NUM, CLID, REC_TYP, CSR_SEQ,
+                CLOSED_IND, STATUS, STATUS_LST
+            FROM MCCA_CSR
+            WHERE REC_TYP = 'CSR'
+            ORDER BY CARRIER_CLM_NUM, CLID, TXN_ID DESC
+        ),
+        Latest_Claim AS (
+            SELECT DISTINCT ON (CARRIER_CLM_NUM)
+                CARRIER_CLM_NUM, MCCA_CLM_NUM, RETENTION, THRESHOLD,
+                DATE_OF_LOSS, POLICY_INCEPTION_DATE, POLICY_END_DATE,
+                CARRIER_PLCY_NUM, LINK_ID
+            FROM MCCA_CLAIM
+            ORDER BY CARRIER_CLM_NUM, TXN_ID DESC
+        )
         SELECT DISTINCT
             T.CARRIER_CLM_NUM,
             T.MCCA_CLM_NUM,
@@ -584,29 +596,12 @@ def get_step7_update_csr_claim_sql() -> str:
             CSR.CLID,
             CSR.REC_TYP,
             CSR.CSR_SEQ
-        FROM MCCA_CLAIM T,
-             (
-                 SELECT C.CARRIER_CLM_NUM, C.CLID, C.REC_TYP, C.CSR_SEQ
-                 FROM MCCA_CSR C
-                 WHERE (C.CLOSED_IND IS NULL OR C.CLOSED_IND = 'N')
-                   AND C.REC_TYP = 'CSR'
-                   AND C.STATUS = 'PN'
-                   AND C.STATUS_LST = 'Open'
-                   AND C.TXN_ID = (
-                       SELECT MAX(CSR1.TXN_ID)
-                       FROM MCCA_CSR CSR1
-                       WHERE CSR1.CARRIER_CLM_NUM = C.CARRIER_CLM_NUM
-                         AND CSR1.CLID = C.CLID
-                         AND CSR1.REC_TYP = 'CSR'
-                   )
-             ) CSR
-        WHERE T.CARRIER_CLM_NUM = CSR.CARRIER_CLM_NUM
+        FROM Latest_Claim T
+        JOIN Latest_CSR CSR ON T.CARRIER_CLM_NUM = CSR.CARRIER_CLM_NUM
+        WHERE (CSR.CLOSED_IND IS NULL OR CSR.CLOSED_IND = 'N')
+          AND CSR.STATUS = 'PN'
+          AND CSR.STATUS_LST = 'Open'
           AND REGEXP_LIKE(T.CARRIER_CLM_NUM, '^([4-9]{1})\\d{8}$')
-          AND T.TXN_ID = (
-              SELECT MAX(T1.TXN_ID)
-              FROM MCCA_CLAIM T1
-              WHERE T1.CARRIER_CLM_NUM = T.CARRIER_CLM_NUM
-          )
     """
 
 
@@ -633,30 +628,28 @@ def map_csr_claim_detail_row(row: Dict[str, Any]) -> IcnCsrDetail:
 # ==============================================================================
 def get_step8_pending_icn_sql() -> str:
     return """
+        WITH Latest_ICN AS (
+            SELECT DISTINCT ON (CARRIER_CLM_NUM)
+                CARRIER_CLM_NUM, STATUS
+            FROM MCCA_ICN
+            WHERE REC_TYP = 'ICN'
+            ORDER BY CARRIER_CLM_NUM, TXN_ID DESC
+        ),
+        Latest_CSR AS (
+            SELECT DISTINCT ON (CARRIER_CLM_NUM, CLID, CSR_SEQ)
+                *
+            FROM MCCA_CSR
+            ORDER BY CARRIER_CLM_NUM, CLID, CSR_SEQ, TXN_ID DESC
+        )
         SELECT C.*
-        FROM MCCA_ICN I,
-             MCCA_CSR C
-        WHERE I.REC_TYP = 'ICN'
-          AND I.TXN_ID = (
-              SELECT MAX(I1.TXN_ID)
-              FROM MCCA_ICN I1
-              WHERE I1.CARRIER_CLM_NUM = I.CARRIER_CLM_NUM
-                AND I1.REC_TYP = 'ICN'
-          )
-          AND I.STATUS NOT IN ('SB', 'SF')
+        FROM Latest_ICN I
+        JOIN Latest_CSR C ON I.CARRIER_CLM_NUM = C.CARRIER_CLM_NUM
+        WHERE I.STATUS NOT IN ('SB', 'SF')
           AND REGEXP_LIKE(I.CARRIER_CLM_NUM, '^([4-9]{1})\\d{8}$')
-          AND I.CARRIER_CLM_NUM = C.CARRIER_CLM_NUM
           AND C.CLID <> '0'
           AND C.CSR_SEQ = 0
           AND C.REC_TYP = 'ICN'
           AND C.LST_UPDTING_PRSN = 'Batch'
-          AND C.TXN_ID = (
-              SELECT MAX(C1.TXN_ID)
-              FROM MCCA_CSR C1
-              WHERE C1.CARRIER_CLM_NUM = C.CARRIER_CLM_NUM
-                AND C1.CLID = C.CLID
-                AND C1.CSR_SEQ = C.CSR_SEQ
-          )
     """
 
 
@@ -665,15 +658,15 @@ def get_step8_pending_icn_sql() -> str:
 # ==============================================================================
 def get_step9_csrs_to_update_sql() -> str:
     return """
-        SELECT *
-        FROM MCCA_CSR C
-        WHERE C.TXN_ID = (
-            SELECT MAX(C1.TXN_ID)
-            FROM MCCA_CSR C1
-            WHERE C1.CARRIER_CLM_NUM = C.CARRIER_CLM_NUM
-              AND C1.CLID = C.CLID
+        WITH Latest_CSR AS (
+            SELECT DISTINCT ON (CARRIER_CLM_NUM, CLID)
+                *
+            FROM MCCA_CSR
+            ORDER BY CARRIER_CLM_NUM, CLID, TXN_ID DESC
         )
-          AND (C.CLOSED_IND IS NULL OR C.CLOSED_IND = 'N')
+        SELECT *
+        FROM Latest_CSR C
+        WHERE (C.CLOSED_IND IS NULL OR C.CLOSED_IND = 'N')
           AND C.REC_TYP = 'CSR'
           AND C.STATUS_LST = 'Open'
           AND C.STATUS NOT IN ('SB', 'SF')
