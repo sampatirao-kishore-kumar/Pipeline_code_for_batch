@@ -173,43 +173,25 @@ class CsrJdbcDaoImpl(BaseJdbcDao):
         and getReservesSql().
         """
         sql = """
-            SELECT COVERAGE, SUM(RESERVE_AMOUNT) AS RESERVE_AMOUNT
-            FROM (
-                SELECT
-                    (CASE WHEN RES.COVERAGE IN ('ZWL', 'ZSL') THEN RES.COVERAGE ELSE 'MED_NET_RESRV' END) AS COVERAGE,
-                    RES.RESERVE_AMOUNT
-                FROM MCCA_RESERVES RES
-                WHERE RES.CARRIER_CLM_NUM = ?
-                  AND RES.CLID = ?
-                  AND RES.RESERVE_DATE = (
-                      SELECT MAX(RES2.RESERVE_DATE)
-                      FROM (
-                          SELECT CARRIER_CLM_NUM, CLID, RESERVE_DATE FROM MCCA_RESERVES
-                          UNION ALL
-                          SELECT CARRIER_CLM_NUM, CLID, RESERVE_DATE FROM STG_MCCA_RESERVES
-                      ) RES2
-                      WHERE RES2.CARRIER_CLM_NUM = RES.CARRIER_CLM_NUM
-                        AND RES2.CLID = RES.CLID
-                  )
+            WITH Combined_Reserves AS (
+                SELECT CARRIER_CLM_NUM, CLID, RESERVE_DATE, COVERAGE, RESERVE_AMOUNT
+                FROM MCCA_RESERVES
+                WHERE CARRIER_CLM_NUM = ? AND CLID = ?
                 UNION ALL
-                SELECT
-                    (CASE WHEN STGRES.COVERAGE IN ('ZWL', 'ZSL') THEN STGRES.COVERAGE ELSE 'MED_NET_RESRV' END) AS COVERAGE,
-                    STGRES.RESERVE_AMOUNT
-                FROM STG_MCCA_RESERVES STGRES
-                WHERE STGRES.CARRIER_CLM_NUM = ?
-                  AND STGRES.CLID = ?
-                  AND STGRES.RESERVE_DATE = (
-                      SELECT MAX(RES3.RESERVE_DATE)
-                      FROM (
-                          SELECT CARRIER_CLM_NUM, CLID, RESERVE_DATE FROM MCCA_RESERVES
-                          UNION ALL
-                          SELECT CARRIER_CLM_NUM, CLID, RESERVE_DATE FROM STG_MCCA_RESERVES
-                      ) RES3
-                      WHERE RES3.CARRIER_CLM_NUM = STGRES.CARRIER_CLM_NUM
-                        AND RES3.CLID = STGRES.CLID
-                  )
-            ) T
-            GROUP BY COVERAGE
+                SELECT CARRIER_CLM_NUM, CLID, RESERVE_DATE, COVERAGE, RESERVE_AMOUNT
+                FROM STG_MCCA_RESERVES
+                WHERE CARRIER_CLM_NUM = ? AND CLID = ?
+            ),
+            Max_Date AS (
+                SELECT MAX(RESERVE_DATE) AS max_date
+                FROM Combined_Reserves
+            )
+            SELECT
+                (CASE WHEN C.COVERAGE IN ('ZWL', 'ZSL') THEN C.COVERAGE ELSE 'MED_NET_RESRV' END) AS COVERAGE,
+                SUM(C.RESERVE_AMOUNT) AS RESERVE_AMOUNT
+            FROM Combined_Reserves C
+            JOIN Max_Date M ON C.RESERVE_DATE = M.max_date
+            GROUP BY (CASE WHEN C.COVERAGE IN ('ZWL', 'ZSL') THEN C.COVERAGE ELSE 'MED_NET_RESRV' END)
         """
         rows = self.query_for_list(sql, [carrier_clm_num, clid, carrier_clm_num, clid])
         result: Dict[str, Decimal] = {}
@@ -819,18 +801,17 @@ class CsrJdbcDaoImpl(BaseJdbcDao):
         Exact port of CsrJdbcDaoImpl.searchIcnCsrData(String carrierClmNum).
         """
         sql = """
+            WITH Latest_CSR AS (
+                SELECT DISTINCT ON (CLID, REC_TYP)
+                    *
+                FROM MCCA_CSR
+                WHERE CARRIER_CLM_NUM = ?
+                  AND REC_TYP = ?
+                ORDER BY CLID, REC_TYP, TXN_ID DESC
+            )
             SELECT *
-            FROM MCCA_CSR CSR
-            WHERE CSR.CARRIER_CLM_NUM = ?
-              AND CSR.REC_TYP = ?
-              AND (CSR.PRBL_LIFE_TM_CARE_IND = 'Y' OR CSR.PRBL_LIFE_TM_CARE_IND IS NULL)
-              AND CSR.TXN_ID IN (
-                  SELECT MAX(CSR1.TXN_ID)
-                  FROM MCCA_CSR CSR1
-                  WHERE CSR1.CARRIER_CLM_NUM = CSR.CARRIER_CLM_NUM
-                    AND CSR1.CLID = CSR.CLID
-                    AND CSR1.REC_TYP = CSR.REC_TYP
-              )
+            FROM Latest_CSR CSR
+            WHERE (CSR.PRBL_LIFE_TM_CARE_IND = 'Y' OR CSR.PRBL_LIFE_TM_CARE_IND IS NULL)
             ORDER BY CSR.LST_UPDT_TIME_STMP DESC
         """
         return self.query(sql, map_csr_amount_update_row, [carrier_clm_num, BatchConstants.ICN_REC_TYPE])
